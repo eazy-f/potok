@@ -4,20 +4,29 @@ import Lib
 import Control.Monad
 import Control.Applicative
 import Data.Maybe (fromMaybe)
+import Data.ByteString.Base16 (decode)
+import Data.ByteString.Char8 (pack, ByteString)
+import qualified Data.ByteString.Char8 as B
+import qualified Data.Time.Clock as T
 
 main :: IO ()
-main = readAndReport $ newStats
+main = newStats >>= readAndReport
      
 readAndReport stats = do
-  displayStats stats
+  time <- T.getCurrentTime
+  newStats <- reportStats time stats
   channelMessage <- readChannelMessage
-  readAndReport $ updateStats channelMessage stats
+  readAndReport $ updateStats channelMessage newStats
 
-data ChannelStats = ChannelStats { stats_in :: Integer, stats_out :: Integer }
+data ChannelStats = ChannelStats { stats_in :: Integer,
+                                   stats_out :: Integer,
+                                   last_msg_time :: T.UTCTime}
 data Direction = Inbound | Outbound deriving Show
-data ChannelMessage = ChannelMessage Direction deriving Show
+data ChannelMessage = ChannelMessage Direction ByteString deriving Show
 
-newStats = ChannelStats {stats_in = 0, stats_out = 0}
+newStats = do
+  now <- T.getCurrentTime
+  return ChannelStats {stats_in = 0, stats_out = 0, last_msg_time = now}
 
 readChannelMessage :: IO ChannelMessage
 readChannelMessage = liftM2 composeMessage readMessagePrologue readMessagePayload
@@ -30,15 +39,20 @@ messageDirection ('>':_) = Just Inbound
 messageDirection ('<':_) = Just Outbound
 messageDirection _ = Nothing
 
-readMessagePayload = getLine
+readMessagePayload = fst . decode . pack . filter ((/=) ' ') <$> getLine
 
-composeMessage direction _ = ChannelMessage direction
+composeMessage direction payload = ChannelMessage direction payload
 
-displayStats stats = sequence_ $ print <$> ([stats_in, stats_out] <*> pure stats)
+reportStats time stats | T.diffUTCTime time (last_msg_time stats) > 5 = 
+                          printStats stats >> (return $ updateTime time stats)
+reportStats _ stats = return stats
 
-updateStats (ChannelMessage Inbound) stats =
-  stats {stats_in = (stats_in stats) + 1}
+printStats stats = sequence_ $ print <$> ([stats_in, stats_out] <*> pure stats)
 
-updateStats (ChannelMessage Outbound) stats =
-  stats {stats_out = (stats_out stats) + 1}
+updateStats (ChannelMessage Inbound payload) stats =
+  stats {stats_in = (stats_in stats) + (toInteger $ B.length payload)}
+
+updateStats (ChannelMessage Outbound payload) stats =
+  stats {stats_out = (stats_out stats) + (toInteger $ B.length payload)}
   
+updateTime time stats = stats {last_msg_time = time}
