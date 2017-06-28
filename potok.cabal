@@ -29,6 +29,10 @@ executable potok-exe
                      , bytestring
                      , time
                      , potok
+                     , brick >= 0.17.2
+                     , vty
+                     , process
+                     , vector
   default-language:    Haskell2010
 
 test-suite potok-test
